@@ -1,6 +1,12 @@
 # Accounting Anomaly Detector
 
+[![CI](https://github.com/OWNER/REPO/actions/workflows/ci.yml/badge.svg)](https://github.com/OWNER/REPO/actions/workflows/ci.yml)
+[![Python](https://img.shields.io/badge/python-3.11+-orange)](https://www.python.org/downloads/)
+[![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+
 Desktop app for importing monthly bank CSV exports, auditing transactions, and detecting anomalies automatically.
+
+Replace `OWNER/REPO` in the CI badge URL after publishing to GitHub.
 
 ## How it works
 
