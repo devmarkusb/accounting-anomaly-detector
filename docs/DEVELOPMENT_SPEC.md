@@ -575,10 +575,6 @@ erDiagram
 - Ubuntu, Python 3.11, installs system GL libs for PySide6
 - Runs ruff check, ruff format check, pytest with `QT_QPA_PLATFORM=offscreen`
 
-**Note:** Local default branch is `master` (per git status at spec time); CI may not run on `master` pushes until branches align.
-
-**Confidence:** Medium for branch mismatch — observed in git status vs workflow file.
-
 ### 11.3 Observability
 
 - No structured logging
@@ -640,7 +636,6 @@ erDiagram
 | **UI-thread parsing** | Low–Medium | Large CSV may freeze UI during preview/import |
 | **No migrations** | Medium | Schema changes break existing user DBs without upgrade path |
 | **No GUI tests** | Medium | Regressions in import/review flow undetected by CI |
-| **CI branch mismatch** | Low | `main` vs `master` |
 | **Import profile not auto-saved** | Low | User may forget Save Profile after edits |
 | **No delete/edit** | Low (product) | Errors require status workarounds or DB surgery |
 
