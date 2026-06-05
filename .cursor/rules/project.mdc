@@ -1,0 +1,15 @@
+---
+description: Project constraints and pointer to canonical agent instructions
+alwaysApply: true
+---
+
+# Accounting Anomaly Detector
+
+Follow **[AGENTS.md](../../AGENTS.md)** for build/test/lint commands, architecture, and the review checklist.
+
+Cursor-specific constraints:
+
+- Never `git push` or otherwise publish commits unless the user explicitly requests it.
+- Do not edit `.venv/`, `.idea/`, user data under `~/.accounting_anomaly/`, or CI/workflows without explicit approval.
+- Keep `core/` and `db/` free of PySide6 imports; UI changes live under `src/accounting_anomaly/ui/`.
+- Run `ruff check src tests`, `ruff format --check src tests`, and `pytest tests/ -v` before finishing substantive changes.

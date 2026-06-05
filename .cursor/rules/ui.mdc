@@ -1,0 +1,16 @@
+---
+description: PySide6 UI conventions when editing Qt widgets
+globs: src/accounting_anomaly/ui/**
+alwaysApply: false
+---
+
+# UI layer (`src/accounting_anomaly/ui/`)
+
+See **[AGENTS.md](../../AGENTS.md)** for full project context.
+
+When changing UI code:
+
+- Delegate parsing, classification, and persistence to `core/` and `db/`; avoid duplicating business logic in widgets.
+- Follow existing patterns: `QMainWindow` / `QDialog` subclasses, signals for user actions, table models in `transaction_table.py`.
+- GUI behavior is not covered by automated tests; note manual verification steps in your response when UI flow changes.
+- Headless test runs use `QT_QPA_PLATFORM=offscreen` (see AGENTS.md); local manual run: `accounting-anomaly`.
