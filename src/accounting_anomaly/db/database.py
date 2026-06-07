@@ -2,6 +2,7 @@ import hashlib
 import sqlite3
 from pathlib import Path
 
+from ..core.categories import is_saved_category
 from ..core.payee import payee_identity
 
 DB_PATH = Path.home() / ".accounting_anomaly" / "data.db"
@@ -40,15 +41,6 @@ CREATE TABLE IF NOT EXISTS payee_categories (
 _REVIEW_STATUSES = ("pending", "anomaly")
 
 
-def _conn() -> sqlite3.Connection:
-    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    c = sqlite3.connect(str(DB_PATH))
-    c.row_factory = sqlite3.Row
-    c.execute("PRAGMA journal_mode=WAL")
-    c.execute("PRAGMA foreign_keys=ON")
-    return c
-
-
 def _migrate(c: sqlite3.Connection) -> None:
     cols = {row[1] for row in c.execute("PRAGMA table_info(transactions)")}
     if "category" not in cols:
@@ -57,10 +49,24 @@ def _migrate(c: sqlite3.Connection) -> None:
         c.execute("ALTER TABLE transactions ADD COLUMN payee TEXT NOT NULL DEFAULT ''")
 
 
+def _ensure_schema(c: sqlite3.Connection) -> None:
+    c.executescript(_SCHEMA)
+    _migrate(c)
+
+
+def _conn() -> sqlite3.Connection:
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    c = sqlite3.connect(str(DB_PATH))
+    c.row_factory = sqlite3.Row
+    c.execute("PRAGMA journal_mode=WAL")
+    c.execute("PRAGMA foreign_keys=ON")
+    _ensure_schema(c)
+    return c
+
+
 def init_db() -> None:
-    with _conn() as c:
-        c.executescript(_SCHEMA)
-        _migrate(c)
+    with _conn():
+        pass
 
 
 def clear_data() -> None:
@@ -89,15 +95,11 @@ def get_payee_categories() -> dict[str, str]:
 
 
 def get_known_categories() -> list[str]:
+    """Distinct user-saved category labels (not auto-filled purpose text)."""
     with _conn() as c:
-        rows = c.execute("""
-            SELECT DISTINCT category FROM (
-                SELECT category FROM transactions WHERE category != ''
-                UNION
-                SELECT category FROM payee_categories
-            )
-            ORDER BY category
-        """).fetchall()
+        rows = c.execute(
+            "SELECT DISTINCT category FROM payee_categories ORDER BY category"
+        ).fetchall()
     return [r[0] for r in rows]
 
 
@@ -122,15 +124,17 @@ def _update_payee_stat(c: sqlite3.Connection, description: str, amount: float) -
         )
 
 
-def _save_payee_category(c: sqlite3.Connection, description: str, category: str) -> None:
-    if not category:
+def _save_payee_category(
+    c: sqlite3.Connection, identity: str, category: str, *, purpose: str
+) -> None:
+    if not is_saved_category(purpose, category):
         return
     c.execute(
         """
         INSERT INTO payee_categories(description, category) VALUES(?,?)
         ON CONFLICT(description) DO UPDATE SET category=excluded.category
         """,
-        (description, category),
+        (identity, category),
     )
 
 
@@ -163,7 +167,7 @@ def insert_transactions(rows: list[dict]) -> tuple[int, int]:
                     _update_payee_stat(c, identity, row["amount"])
                 category = row.get("category", "")
                 if category:
-                    _save_payee_category(c, identity, category)
+                    _save_payee_category(c, identity, category, purpose=row["description"])
                 inserted += 1
             except sqlite3.IntegrityError:
                 skipped += 1
@@ -223,7 +227,7 @@ def update_review(tx_id: int, status: str, category: str) -> None:
             "UPDATE transactions SET status=?, category=? WHERE id=?",
             (status, category, tx_id),
         )
-        _save_payee_category(c, identity, category)
+        _save_payee_category(c, identity, category, purpose=row["description"])
         if status == "approved":
             _update_payee_stat(c, identity, row["amount"])
 

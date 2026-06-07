@@ -3,7 +3,7 @@ import math
 from .payee import payee_identity
 
 ANOMALY_SIGMA = 2.5
-MIN_HISTORY = 3  # need at least this many samples before auto-approving
+MIN_HISTORY = 1  # one approved sample per payee enables auto-classify on re-import
 
 
 def _std(stats: dict) -> float:
@@ -34,11 +34,14 @@ def classify(transactions: list[dict], payee_stats: dict) -> list[dict]:
 
         if stats is None or stats["count"] < MIN_HISTORY:
             status = "pending"
+        elif stats["count"] == 1:
+            deviation = abs(amount - stats["mean"])
+            status = "approved" if deviation < 1e-6 else "anomaly"
         else:
             std = _std(stats)
             deviation = abs(amount - stats["mean"])
             if std == 0:
-                status = "approved" if deviation == 0 else "anomaly"
+                status = "approved" if deviation < 1e-6 else "anomaly"
             elif deviation <= ANOMALY_SIGMA * std:
                 status = "approved"
             else:

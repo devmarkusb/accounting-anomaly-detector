@@ -1,4 +1,13 @@
-from accounting_anomaly.core.categories import apply_categories, suggest_category
+from accounting_anomaly.core.categories import (
+    apply_categories,
+    is_saved_category,
+    suggest_category,
+)
+
+
+def test_is_saved_category_rejects_purpose_autofill():
+    assert not is_saved_category("AMAZON MARKETPLACE", "AMAZON MARKETPLACE")
+    assert is_saved_category("AMAZON MARKETPLACE", "Shopping")
 
 
 def test_suggest_category_uses_learned_mapping():
@@ -11,7 +20,7 @@ def test_suggest_category_defaults_to_purpose():
     assert suggest_category(tx, {}) == "AMAZON MARKETPLACE"
 
 
-def test_apply_categories_prefills_known_payee():
+def test_apply_categories_only_learned():
     txs = [
         {"payee": "Coffee Shop", "description": "Latte", "amount": -3.5, "status": "pending"},
         {"payee": "", "description": "New Payee", "amount": -10.0, "status": "pending"},
@@ -19,7 +28,7 @@ def test_apply_categories_prefills_known_payee():
     payee_categories = {"Coffee Shop": "Food"}
     result = apply_categories(txs, payee_categories)
     assert result[0]["category"] == "Food"
-    assert result[1]["category"] == "New Payee"
+    assert result[1]["category"] == ""
 
 
 def test_apply_categories_preserves_other_fields():

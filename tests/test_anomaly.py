@@ -1,4 +1,4 @@
-from accounting_anomaly.core.anomaly import MIN_HISTORY, classify
+from accounting_anomaly.core.anomaly import classify
 
 
 def _stats(count: int, mean: float, m2: float) -> dict:
@@ -11,11 +11,32 @@ def test_unknown_payee_is_pending():
     assert result[0]["status"] == "pending"
 
 
-def test_insufficient_history_is_pending():
-    stats = {"Coffee": _stats(MIN_HISTORY - 1, -3.5, 0.5)}
+def test_one_sample_exact_amount_auto_approved():
+    stats = {"Coffee": _stats(1, -3.5, 0.0)}
     txs = [{"description": "Coffee", "amount": -3.5, "status": "pending"}]
     result = classify(txs, stats)
-    assert result[0]["status"] == "pending"
+    assert result[0]["status"] == "approved"
+
+
+def test_one_sample_different_amount_anomaly():
+    stats = {"Coffee": _stats(1, -3.5, 0.0)}
+    txs = [{"description": "Coffee", "amount": -10.0, "status": "pending"}]
+    result = classify(txs, stats)
+    assert result[0]["status"] == "anomaly"
+
+
+def test_payee_identity_used_for_stats_lookup():
+    stats = {"ACME GmbH": _stats(1, -42.0, 0.0)}
+    txs = [
+        {
+            "payee": "ACME GmbH",
+            "description": "Invoice Jan",
+            "amount": -42.0,
+            "status": "pending",
+        }
+    ]
+    result = classify(txs, stats)
+    assert result[0]["status"] == "approved"
 
 
 def test_known_payee_normal_amount_approved():

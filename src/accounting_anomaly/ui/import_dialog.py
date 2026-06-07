@@ -21,7 +21,15 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ..core.csv_parser import CsvProfile, load_profiles, parse_csv, read_raw, save_profiles
+from ..core.csv_parser import (
+    CsvProfile,
+    header_column_indices,
+    load_profiles,
+    parse_csv,
+    read_raw,
+    resolve_column_index,
+    save_profiles,
+)
 
 
 class _ProfileEditor(QWidget):
@@ -44,9 +52,13 @@ class _ProfileEditor(QWidget):
         self.payee_col = QSpinBox()
         self.payee_col.setRange(-1, 99)
         self.payee_col.setValue(profile.payee_col)
+        self.payee_header = QLineEdit(profile.payee_header)
+        self.payee_header.setPlaceholderText("e.g. Zahlungsempfänger, Zahlungspflichtiger")
         self.desc_col = QSpinBox()
         self.desc_col.setRange(0, 99)
         self.desc_col.setValue(profile.description_col)
+        self.desc_header = QLineEdit(profile.description_header)
+        self.desc_header.setPlaceholderText("e.g. Verwendungszweck")
         self.amount_col = QSpinBox()
         self.amount_col.setRange(0, 99)
         self.amount_col.setValue(profile.amount_col)
@@ -64,7 +76,9 @@ class _ProfileEditor(QWidget):
         layout.addRow("Date column index:", self.date_col)
         layout.addRow("Date format (strptime):", self.date_fmt)
         layout.addRow("Payee column index (−1 = none):", self.payee_col)
+        layout.addRow("Payee column header:", self.payee_header)
         layout.addRow("Purpose / description column index:", self.desc_col)
+        layout.addRow("Purpose / description header:", self.desc_header)
         layout.addRow("Amount column index:", self.amount_col)
         layout.addRow("Balance column index (−1 = none):", self.balance_col)
         layout.addRow("Account label:", self.account)
@@ -79,7 +93,9 @@ class _ProfileEditor(QWidget):
         profile.date_col = self.date_col.value()
         profile.date_format = self.date_fmt.text().strip() or "%d.%m.%Y"
         profile.payee_col = self.payee_col.value()
+        profile.payee_header = self.payee_header.text().strip()
         profile.description_col = self.desc_col.value()
+        profile.description_header = self.desc_header.text().strip()
         profile.amount_col = self.amount_col.value()
         profile.balance_col = self.balance_col.value()
         profile.account = self.account.text().strip()
@@ -94,7 +110,9 @@ class _ProfileEditor(QWidget):
         self.date_col.setValue(profile.date_col)
         self.date_fmt.setText(profile.date_format)
         self.payee_col.setValue(profile.payee_col)
+        self.payee_header.setText(profile.payee_header)
         self.desc_col.setValue(profile.description_col)
+        self.desc_header.setText(profile.description_header)
         self.amount_col.setValue(profile.amount_col)
         self.balance_col.setValue(profile.balance_col)
         self.account.setText(profile.account)
@@ -199,6 +217,7 @@ class ImportDialog(QDialog):
         try:
             profile = self._editor.get_profile()
             header, rows = read_raw(self._path, profile)
+            self._sync_columns_from_header(header)
             display = ([header] if header else []) + rows[:100]
             ncols = max((len(r) for r in display), default=0)
             self._raw_table.setRowCount(len(display))
@@ -208,6 +227,19 @@ class ImportDialog(QDialog):
                     self._raw_table.setItem(r, c, QTableWidgetItem(cell))
         except Exception as exc:
             QMessageBox.warning(self, "Read error", str(exc))
+
+    def _sync_columns_from_header(self, header: list[str]) -> None:
+        if not header:
+            return
+        payee_header = self._editor.payee_header.text().strip()
+        payee_cols = header_column_indices(header, payee_header)
+        if payee_cols:
+            self._editor.payee_col.setValue(payee_cols[0])
+        desc_header = self._editor.desc_header.text().strip()
+        if desc_header:
+            self._editor.desc_col.setValue(
+                resolve_column_index(header, self._editor.desc_col.value(), desc_header)
+            )
 
     def _do_preview(self) -> None:
         if not self._path:

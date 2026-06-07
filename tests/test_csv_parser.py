@@ -3,7 +3,13 @@ from pathlib import Path
 
 import pytest
 
-from accounting_anomaly.core.csv_parser import CsvProfile, parse_amount, parse_csv
+from accounting_anomaly.core.csv_parser import (
+    CsvProfile,
+    header_column_indices,
+    parse_amount,
+    parse_csv,
+    resolve_column_index,
+)
 
 
 def test_parse_amount_european():
@@ -61,6 +67,77 @@ def test_parse_csv_basic():
         assert txs[0]["payee"] == ""
 
         assert txs[1]["amount"] == pytest.approx(2000.0)
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
+def test_header_column_indices_finds_german_payee_columns():
+    header = ["Datum", "Zahlungsempfänger", "Verwendungszweck", "Betrag"]
+    assert header_column_indices(header, "Zahlungsempfänger") == [1]
+    assert header_column_indices(header, "Zahlungsempfänger,Zahlungspflichtiger") == [1]
+
+
+def test_resolve_column_index_by_header_name():
+    header = ["Datum", "Verwendungszweck", "Betrag"]
+    assert resolve_column_index(header, 99, "Verwendungszweck") == 1
+    assert resolve_column_index(header, 2, "") == 2
+
+
+def test_parse_csv_with_payee_header_names():
+    content = (
+        "Datum;Zahlungsempfänger;Verwendungszweck;Betrag\n"
+        "01.01.24;ACME GmbH;Office supplies;-42,50\n"
+    )
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False, encoding="utf-8") as f:
+        f.write(content)
+        tmp = Path(f.name)
+
+    try:
+        profile = CsvProfile(
+            delimiter=";",
+            decimal=",",
+            thousands=".",
+            skip_rows=1,
+            date_col=0,
+            date_format="%d.%m.%y",
+            payee_col=-1,
+            payee_header="Zahlungsempfänger,Zahlungspflichtiger",
+            description_col=99,
+            description_header="Verwendungszweck",
+            amount_col=3,
+            encoding="utf-8",
+        )
+        txs = parse_csv(tmp, profile)
+        assert len(txs) == 1
+        assert txs[0]["payee"] == "ACME GmbH"
+        assert txs[0]["description"] == "Office supplies"
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
+def test_parse_csv_payee_header_falls_back_to_payer_column():
+    content = (
+        "Datum;Zahlungspflichtiger;Verwendungszweck;Betrag\n01.01.24;Employer AG;Salary;2000,00\n"
+    )
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False, encoding="utf-8") as f:
+        f.write(content)
+        tmp = Path(f.name)
+
+    try:
+        profile = CsvProfile(
+            delimiter=";",
+            decimal=",",
+            thousands=".",
+            skip_rows=1,
+            date_col=0,
+            date_format="%d.%m.%y",
+            payee_header="Zahlungsempfänger,Zahlungspflichtiger",
+            description_header="Verwendungszweck",
+            amount_col=3,
+            encoding="utf-8",
+        )
+        txs = parse_csv(tmp, profile)
+        assert txs[0]["payee"] == "Employer AG"
     finally:
         tmp.unlink(missing_ok=True)
 
