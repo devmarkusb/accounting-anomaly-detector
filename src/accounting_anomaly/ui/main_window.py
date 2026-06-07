@@ -107,7 +107,7 @@ class MainWindow(QMainWindow):
         self._table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self._table.setContextMenuPolicy(Qt.CustomContextMenu)
         self._table.customContextMenuRequested.connect(self._context_menu)
-        self._table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+        self._table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
         self._table.setAlternatingRowColors(False)
         splitter.addWidget(self._table)
 
@@ -149,7 +149,8 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "Review", "No pending or anomaly transactions to review.")
             return
         dialog = ReviewDialog(self)
-        if dialog.exec() == QDialog.Accepted:
+        dialog.exec()
+        if dialog.reviewed_count:
             self._refresh()
 
     def _refresh(self) -> None:

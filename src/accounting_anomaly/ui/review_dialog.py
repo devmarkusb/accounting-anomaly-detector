@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
 )
 
 from .. import db
+from ..core.categories import suggest_category
 
 
 class ReviewDialog(QDialog):
@@ -37,13 +38,16 @@ class ReviewDialog(QDialog):
 
         form = QFormLayout()
         self._date = QLabel()
+        self._payee = QLabel()
+        self._payee.setWordWrap(True)
         self._description = QLabel()
         self._description.setWordWrap(True)
         self._amount = QLabel()
         self._account = QLabel()
         self._status = QLabel()
         form.addRow("Date:", self._date)
-        form.addRow("Payee:", self._description)
+        form.addRow("Payee:", self._payee)
+        form.addRow("Purpose / Description:", self._description)
         form.addRow("Amount:", self._amount)
         form.addRow("Account:", self._account)
         form.addRow("Status:", self._status)
@@ -60,12 +64,10 @@ class ReviewDialog(QDialog):
         self._approve_btn = QPushButton("Approve (A)")
         self._ignore_btn = QPushButton("Ignore (I)")
         self._anomaly_btn = QPushButton("Anomaly (X)")
-        self._skip_btn = QPushButton("Skip")
         self._approve_btn.clicked.connect(lambda: self._apply("approved"))
         self._ignore_btn.clicked.connect(lambda: self._apply("ignored"))
         self._anomaly_btn.clicked.connect(lambda: self._apply("anomaly"))
-        self._skip_btn.clicked.connect(self._skip)
-        for btn in (self._approve_btn, self._ignore_btn, self._anomaly_btn, self._skip_btn):
+        for btn in (self._approve_btn, self._ignore_btn, self._anomaly_btn):
             actions.addWidget(btn)
         root.addLayout(actions)
 
@@ -83,6 +85,7 @@ class ReviewDialog(QDialog):
             self._progress.setText("No transactions need review.")
             for widget in (
                 self._date,
+                self._payee,
                 self._description,
                 self._amount,
                 self._account,
@@ -91,7 +94,6 @@ class ReviewDialog(QDialog):
                 self._approve_btn,
                 self._ignore_btn,
                 self._anomaly_btn,
-                self._skip_btn,
             ):
                 widget.setEnabled(False)
             return
@@ -105,15 +107,17 @@ class ReviewDialog(QDialog):
             f"({self._index + 1}/{len(self._queue)} total)"
         )
         self._date.setText(tx["date"])
+        self._payee.setText(tx.get("payee", "") or "—")
         self._description.setText(tx["description"])
         self._amount.setText(f"{tx['amount']:+.2f}")
         self._account.setText(tx.get("account", ""))
         self._status.setText(tx["status"])
-        self._category.setCurrentText(tx.get("category", ""))
+        category = tx.get("category", "").strip() or suggest_category(tx, db.get_payee_categories())
+        self._category.setCurrentText(category)
 
     def _update_nav_state(self) -> None:
         has_queue = bool(self._queue) and self._index < len(self._queue)
-        for btn in (self._approve_btn, self._ignore_btn, self._anomaly_btn, self._skip_btn):
+        for btn in (self._approve_btn, self._ignore_btn, self._anomaly_btn):
             btn.setEnabled(has_queue)
 
     def _apply(self, status: str) -> None:
@@ -136,20 +140,6 @@ class ReviewDialog(QDialog):
             return
         self._load_current()
         self._update_nav_state()
-
-    def _skip(self) -> None:
-        if not self._queue or self._index >= len(self._queue):
-            return
-        self._index += 1
-        if self._index >= len(self._queue):
-            QMessageBox.information(
-                self,
-                "Review Paused",
-                f"Reviewed {self._reviewed} transaction(s). {len(self._queue)} still need review.",
-            )
-            self.accept()
-            return
-        self._load_current()
 
     @property
     def reviewed_count(self) -> int:

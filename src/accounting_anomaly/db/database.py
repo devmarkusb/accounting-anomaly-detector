@@ -2,12 +2,15 @@ import hashlib
 import sqlite3
 from pathlib import Path
 
+from ..core.payee import payee_identity
+
 DB_PATH = Path.home() / ".accounting_anomaly" / "data.db"
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS transactions (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     date        TEXT    NOT NULL,
+    payee       TEXT    NOT NULL DEFAULT '',
     description TEXT    NOT NULL,
     amount      REAL    NOT NULL,
     balance     REAL,
@@ -50,6 +53,8 @@ def _migrate(c: sqlite3.Connection) -> None:
     cols = {row[1] for row in c.execute("PRAGMA table_info(transactions)")}
     if "category" not in cols:
         c.execute("ALTER TABLE transactions ADD COLUMN category TEXT NOT NULL DEFAULT ''")
+    if "payee" not in cols:
+        c.execute("ALTER TABLE transactions ADD COLUMN payee TEXT NOT NULL DEFAULT ''")
 
 
 def init_db() -> None:
@@ -136,12 +141,14 @@ def insert_transactions(rows: list[dict]) -> tuple[int, int]:
         for row in rows:
             h = make_hash(row["date"], row["description"], row["amount"])
             try:
+                identity = payee_identity(row)
                 c.execute(
                     "INSERT INTO transactions"
-                    "(date, description, amount, balance, month, account, status, category, hash)"
-                    " VALUES(?,?,?,?,?,?,?,?,?)",
+                    "(date, payee, description, amount, balance, month, account, status, category, hash)"
+                    " VALUES(?,?,?,?,?,?,?,?,?,?)",
                     (
                         row["date"],
+                        row.get("payee", ""),
                         row["description"],
                         row["amount"],
                         row.get("balance"),
@@ -153,10 +160,10 @@ def insert_transactions(rows: list[dict]) -> tuple[int, int]:
                     ),
                 )
                 if row["status"] == "approved":
-                    _update_payee_stat(c, row["description"], row["amount"])
+                    _update_payee_stat(c, identity, row["amount"])
                 category = row.get("category", "")
                 if category:
-                    _save_payee_category(c, row["description"], category)
+                    _save_payee_category(c, identity, category)
                 inserted += 1
             except sqlite3.IntegrityError:
                 skipped += 1
@@ -196,10 +203,10 @@ def update_status(tx_id: int, status: str) -> None:
     with _conn() as c:
         if status == "approved":
             row = c.execute(
-                "SELECT description, amount FROM transactions WHERE id=?", (tx_id,)
+                "SELECT payee, description, amount FROM transactions WHERE id=?", (tx_id,)
             ).fetchone()
             if row:
-                _update_payee_stat(c, row["description"], row["amount"])
+                _update_payee_stat(c, payee_identity(dict(row)), row["amount"])
         c.execute("UPDATE transactions SET status=? WHERE id=?", (status, tx_id))
 
 
@@ -207,17 +214,18 @@ def update_review(tx_id: int, status: str, category: str) -> None:
     """Apply review decision: status, optional category, and learned payee mapping."""
     with _conn() as c:
         row = c.execute(
-            "SELECT description, amount FROM transactions WHERE id=?", (tx_id,)
+            "SELECT payee, description, amount FROM transactions WHERE id=?", (tx_id,)
         ).fetchone()
         if row is None:
             return
+        identity = payee_identity(dict(row))
         c.execute(
             "UPDATE transactions SET status=?, category=? WHERE id=?",
             (status, category, tx_id),
         )
-        _save_payee_category(c, row["description"], category)
+        _save_payee_category(c, identity, category)
         if status == "approved":
-            _update_payee_stat(c, row["description"], row["amount"])
+            _update_payee_stat(c, identity, row["amount"])
 
 
 def get_months() -> list[str]:

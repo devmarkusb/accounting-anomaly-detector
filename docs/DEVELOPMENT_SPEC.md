@@ -95,7 +95,7 @@ A single imported bank line item stored in SQLite.
 | `month` | `YYYY-MM` | Derived from `date` | Used for filtering and summary |
 | `account` | string | Import profile label | Not parsed from a CSV column |
 | `status` | enum | Classification + user override | See §3.2 |
-| `category` | string | User review + learned payee mapping | Free text; pre-filled from `payee_categories` on import |
+| `category` | string | User review + learned payee mapping | Free text; learned category or purpose/description on first encounter |
 | `hash` | string (20 hex chars) | `make_hash(date, description, amount)` | Deduplication key |
 | `imported_at` | timestamp | DB default | `datetime('now')` on insert |
 
@@ -124,7 +124,7 @@ Learned free-text category per unique `description` string:
 | `description` | Payee key (same as transaction `description`) |
 | `category` | User-assigned label (e.g. "Groceries", "Rent") |
 
-Updated when the user sets a category during review. Used to pre-fill `transactions.category` on import via `apply_categories()`.
+Updated when the user sets a category during review. Used to pre-fill `transactions.category` on import via `apply_categories()`; first encounter defaults to the transaction purpose/description.
 
 **Confidence:** High — `database.py`, `core/categories.py`, `review_dialog.py`.
 
@@ -312,8 +312,8 @@ sequenceDiagram
     W->>D: get_review_queue()
     D-->>R: ordered pending/anomaly rows
     loop each transaction
-        R->>U: Show payee, amount, status, category (pre-filled)
-        U->>R: Approve (A) / Ignore (I) / Anomaly (X) / Skip
+        R->>U: Show purpose/description, amount, status, category (suggested)
+        U->>R: Approve (A) / Ignore (I) / Anomaly (X), or Done to exit
         R->>D: update_review(id, status, category)
     end
     R-->>W: accept
@@ -322,8 +322,8 @@ sequenceDiagram
 
 1. User opens **Review** (**Ctrl+R**) or accepts post-import prompt
 2. `get_review_queue()` returns `pending` and `anomaly` rows ordered `month ASC, date ASC`
-3. For each entry the dialog shows transaction details and an editable category field (combo with known categories)
-4. User chooses **Approve**, **Ignore**, or **Anomaly** (keyboard **A / I / X**), or **Skip** to defer
+3. For each entry the dialog shows purpose/description, amount, status, and an editable category field (learned category or purpose/description as default; combo lists prior categories)
+4. User chooses **Approve**, **Ignore**, or **Anomaly** (keyboard **A / I / X**); **Done** closes and leaves remaining items for a later session
 5. `update_review()` sets status and category; non-empty category is saved to `payee_categories`; approving updates `payee_stats`
 6. Over repeated imports, known in-band payees auto-approve and known payees get categories pre-filled — manual review volume decreases
 

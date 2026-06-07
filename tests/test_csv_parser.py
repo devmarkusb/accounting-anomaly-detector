@@ -58,8 +58,35 @@ def test_parse_csv_basic():
         assert txs[0]["balance"] == pytest.approx(100.0)
         assert txs[0]["month"] == "2024-01"
         assert txs[0]["status"] == "pending"
+        assert txs[0]["payee"] == ""
 
         assert txs[1]["amount"] == pytest.approx(2000.0)
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
+def test_parse_csv_with_payee_column():
+    content = "Date;Payee;Purpose;Amount\n01.01.2024;ACME GmbH;Office supplies;-42,50\n"
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False, encoding="utf-8") as f:
+        f.write(content)
+        tmp = Path(f.name)
+
+    try:
+        profile = CsvProfile(
+            delimiter=";",
+            decimal=",",
+            thousands=".",
+            skip_rows=1,
+            date_col=0,
+            payee_col=1,
+            description_col=2,
+            amount_col=3,
+            encoding="utf-8",
+        )
+        txs = parse_csv(tmp, profile)
+        assert len(txs) == 1
+        assert txs[0]["payee"] == "ACME GmbH"
+        assert txs[0]["description"] == "Office supplies"
     finally:
         tmp.unlink(missing_ok=True)
 

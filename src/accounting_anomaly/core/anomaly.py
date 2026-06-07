@@ -1,5 +1,7 @@
 import math
 
+from .payee import payee_identity
+
 ANOMALY_SIGMA = 2.5
 MIN_HISTORY = 3  # need at least this many samples before auto-approving
 
@@ -26,7 +28,7 @@ def classify(transactions: list[dict], payee_stats: dict) -> list[dict]:
             result.append(tx)
             continue
 
-        desc = tx["description"]
+        desc = payee_identity(tx)
         amount = tx["amount"]
         stats = payee_stats.get(desc)
 

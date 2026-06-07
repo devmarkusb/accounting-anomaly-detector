@@ -13,7 +13,8 @@ def isolated_db(tmp_path, monkeypatch):
 def _tx(**overrides) -> dict:
     base = {
         "date": "2024-01-15",
-        "description": "Coffee Shop",
+        "payee": "Coffee Shop",
+        "description": "Morning coffee",
         "amount": -3.5,
         "balance": None,
         "month": "2024-01",
@@ -41,13 +42,14 @@ def test_insert_and_review_queue_order(isolated_db):
     ]
 
 
-def test_update_review_learns_category_and_approves(isolated_db):
-    inserted, _ = db.insert_transactions([_tx()])
+def test_update_review_learns_category_by_payee(isolated_db):
+    db.insert_transactions([_tx()])
     tx_id = db.get_transactions()[0]["id"]
     db.update_review(tx_id, "approved", "Food")
     row = db.get_transactions()[0]
     assert row["status"] == "approved"
     assert row["category"] == "Food"
+    assert row["payee"] == "Coffee Shop"
     assert db.get_payee_categories()["Coffee Shop"] == "Food"
     assert db.get_payee_stats()["Coffee Shop"]["count"] == 1
 

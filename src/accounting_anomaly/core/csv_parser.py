@@ -17,6 +17,7 @@ class CsvProfile:
     skip_rows: int = 1
     date_col: int = 0
     date_format: str = "%d.%m.%Y"
+    payee_col: int = -1  # -1 = not present; stats/categories fall back to description
     description_col: int = 1
     amount_col: int = 2
     balance_col: int = -1  # -1 = not present
@@ -79,8 +80,16 @@ def parse_csv(path: Path, profile: CsvProfile) -> list[dict]:
             date_str = row[profile.date_col].strip()
             dt = datetime.strptime(date_str, profile.date_format)
             description = row[profile.description_col].strip()
-            if not description:
+            payee = ""
+            if profile.payee_col >= 0:
+                try:
+                    payee = row[profile.payee_col].strip()
+                except IndexError:
+                    pass
+            if not description and not payee:
                 continue
+            if not description:
+                description = payee
             amount = parse_amount(row[profile.amount_col], profile.decimal, profile.thousands)
             balance: float | None = None
             if profile.balance_col >= 0:
@@ -93,6 +102,7 @@ def parse_csv(path: Path, profile: CsvProfile) -> list[dict]:
             transactions.append(
                 {
                     "date": dt.strftime("%Y-%m-%d"),
+                    "payee": payee,
                     "description": description,
                     "amount": amount,
                     "balance": balance,

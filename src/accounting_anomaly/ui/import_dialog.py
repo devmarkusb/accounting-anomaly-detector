@@ -41,6 +41,9 @@ class _ProfileEditor(QWidget):
         self.date_col.setRange(0, 99)
         self.date_col.setValue(profile.date_col)
         self.date_fmt = QLineEdit(profile.date_format)
+        self.payee_col = QSpinBox()
+        self.payee_col.setRange(-1, 99)
+        self.payee_col.setValue(profile.payee_col)
         self.desc_col = QSpinBox()
         self.desc_col.setRange(0, 99)
         self.desc_col.setValue(profile.description_col)
@@ -60,7 +63,8 @@ class _ProfileEditor(QWidget):
         layout.addRow("Header rows to skip:", self.skip)
         layout.addRow("Date column index:", self.date_col)
         layout.addRow("Date format (strptime):", self.date_fmt)
-        layout.addRow("Description column index:", self.desc_col)
+        layout.addRow("Payee column index (−1 = none):", self.payee_col)
+        layout.addRow("Purpose / description column index:", self.desc_col)
         layout.addRow("Amount column index:", self.amount_col)
         layout.addRow("Balance column index (−1 = none):", self.balance_col)
         layout.addRow("Account label:", self.account)
@@ -74,6 +78,7 @@ class _ProfileEditor(QWidget):
         profile.skip_rows = self.skip.value()
         profile.date_col = self.date_col.value()
         profile.date_format = self.date_fmt.text().strip() or "%d.%m.%Y"
+        profile.payee_col = self.payee_col.value()
         profile.description_col = self.desc_col.value()
         profile.amount_col = self.amount_col.value()
         profile.balance_col = self.balance_col.value()
@@ -88,6 +93,7 @@ class _ProfileEditor(QWidget):
         self.skip.setValue(profile.skip_rows)
         self.date_col.setValue(profile.date_col)
         self.date_fmt.setText(profile.date_format)
+        self.payee_col.setValue(profile.payee_col)
         self.desc_col.setValue(profile.description_col)
         self.amount_col.setValue(profile.amount_col)
         self.balance_col.setValue(profile.balance_col)
@@ -211,8 +217,8 @@ class ImportDialog(QDialog):
         try:
             profile = self._editor.get_profile()
             txs = parse_csv(self._path, profile)
-            headers = ["Date", "Description", "Amount", "Balance", "Account", "Month"]
-            keys = ["date", "description", "amount", "balance", "account", "month"]
+            headers = ["Date", "Payee", "Purpose", "Amount", "Balance", "Account", "Month"]
+            keys = ["date", "payee", "description", "amount", "balance", "account", "month"]
             self._preview_table.setColumnCount(len(headers))
             self._preview_table.setHorizontalHeaderLabels(headers)
             self._preview_table.setRowCount(len(txs))

@@ -8,10 +8,21 @@ STATUS_COLOR: dict[str, QColor] = {
     "anomaly": QColor("#fdecea"),
 }
 
-_COLS = ["date", "description", "amount", "balance", "account", "month", "category", "status"]
+_COLS = [
+    "date",
+    "payee",
+    "description",
+    "amount",
+    "balance",
+    "account",
+    "month",
+    "category",
+    "status",
+]
 _HEADERS = [
     "Date",
-    "Description",
+    "Payee",
+    "Purpose",
     "Amount",
     "Balance",
     "Account",
