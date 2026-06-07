@@ -8,19 +8,22 @@ Desktop app for importing monthly bank CSV exports, auditing transactions, and d
 
 ## How it works
 
-1. Import your bank's CSV export each month
-2. New payees and unusual amounts are flagged automatically
-3. Right-click to approve, ignore, or mark as anomaly
-4. Over time, more transactions are auto-approved — only genuine anomalies need review
+1. Import your bank's CSV export each month (**Ctrl+I**)
+2. New payees land as `pending` (verify they are legitimate); known payees with unusual amounts become `anomaly`
+3. Walk through the **review queue** month by month (**Ctrl+R**) — assign a status and category to each entry
+4. Categories are learned per payee and pre-filled on the next import
+5. Over time, recurring payees with typical amounts are auto-approved — you review less each month
 
 **Transaction statuses:**
 
 | Status | Meaning |
 |--------|---------|
-| `pending` | New payee or insufficient history — needs review |
+| `pending` | New or unknown payee — needs your review (potentially unwanted) |
 | `approved` | Known payee with a typical amount |
 | `anomaly` | Known payee but amount is an outlier (>2.5σ from mean) |
 | `ignored` | Excluded from reporting (e.g. transfers between own accounts) |
+
+**Review shortcuts** (in review dialog): **A** approve, **I** ignore, **X** anomaly.
 
 ## Requirements
 
@@ -65,11 +68,23 @@ ruff format src tests
 2. Browse to your bank's CSV export
 3. Configure the import profile (column indices, date format, delimiter, decimal separator)
 4. Click **Preview** to verify parsing looks correct
-5. Click **OK** to import
+5. Click **OK** to import — if anything needs review, you'll be prompted to start the guided walkthrough
 
 Profiles are saved to `~/.accounting_anomaly/config.json` — configure once per bank.
 
 ## Data
 
-All data is stored locally in `~/.accounting_anomaly/data.db` (SQLite).
-Duplicate detection: re-importing the same CSV is safe, duplicates are skipped.
+| Path | Contents |
+|------|----------|
+| `~/.accounting_anomaly/data.db` | Transactions, payee stats, learned categories |
+| `~/.accounting_anomaly/config.json` | Import profiles |
+
+Duplicate detection: re-importing the same CSV is safe; duplicates are skipped.
+
+**Reset transaction data** (keeps import profiles):
+
+```bash
+rm -f ~/.accounting_anomaly/data.db ~/.accounting_anomaly/data.db-wal ~/.accounting_anomaly/data.db-shm
+```
+
+Or from Python: `accounting_anomaly.db.clear_data()`.

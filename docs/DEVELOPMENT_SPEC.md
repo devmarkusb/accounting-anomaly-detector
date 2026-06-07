@@ -4,16 +4,16 @@
 
 | Field | Value |
 |-------|-------|
-| Version | 0.1.0 |
-| Spec revision | 1.0 |
-| Date | 2026-06-05 |
+| Version | 0.2.0 |
+| Spec revision | 1.1 |
+| Date | 2026-06-08 |
 | Evidence base | `src/`, `tests/`, `README.md`, `pyproject.toml`, `.github/workflows/ci.yml` |
 
 ---
 
 ## 1. Executive Summary
 
-Accounting Anomaly Detector is a **single-user, local-only desktop application** that helps a person review monthly bank transaction exports. The user imports CSV files, configures per-bank parsing profiles, and reviews transactions that are automatically classified as pending, approved, anomaly, or ignored. Over repeated imports, payees with sufficient approved history can be auto-approved when amounts fall within a statistical band; unusual amounts are flagged as anomalies.
+Accounting Anomaly Detector is a **single-user, local-only desktop application** that helps a person review monthly bank transaction exports. The user imports CSV files, configures per-bank parsing profiles, and walks through a **guided month-by-month review** for transactions that need attention (`pending` or `anomaly`). Each review step assigns a status and optional free-text **category**; categories are learned per payee and pre-filled on re-import. Over repeated imports, payees with sufficient approved history are auto-approved when amounts fall within a statistical band; unusual amounts are flagged as `anomaly` (amount deviation, not “new payee”).
 
 The system stores all persistent data on the user's machine (`~/.accounting_anomaly/`). There is no network layer, authentication, multi-user support, or deployment infrastructure beyond a desktop process and GitHub Actions CI for quality checks.
 
@@ -30,8 +30,10 @@ Reduce manual effort when auditing recurring bank activity by:
 1. Importing bank CSV exports with configurable column mapping
 2. Detecting duplicate imports safely
 3. Auto-classifying transactions using per-payee amount statistics
-4. Letting the user override classification via context menu
-5. Showing month-level income/expense summaries and review counts
+4. Guiding the user through month-ordered review (`pending` and `anomaly` queue) with category assignment
+5. Learning per-payee categories and pre-filling them on future imports
+6. Letting the user override classification via context menu or review dialog
+7. Showing month-level income/expense summaries and review counts
 
 **Confidence:** High — `README.md`, `main_window.py`, `anomaly.py`.
 
@@ -63,12 +65,13 @@ flowchart TB
 
 | Surface | Location | Behavior |
 |---------|----------|----------|
-| Main window | `ui/main_window.py` | Transaction table, filters, summary, import toolbar |
+| Main window | `ui/main_window.py` | Transaction table, filters, summary, import/review toolbar |
 | Import dialog | `ui/import_dialog.py` | File picker, profile editor, raw/parsed preview |
+| Review dialog | `ui/review_dialog.py` | Month-ordered guided review; status + category per entry |
 | Context menu | `main_window.py` | Bulk status change on selected rows |
 | Status bar | `main_window.py` | Row count, pending count, anomaly count for current filter |
 
-Keyboard shortcut confirmed: **Ctrl+I** imports CSV.
+Keyboard shortcuts: **Ctrl+I** imports CSV; **Ctrl+R** opens review; **A / I / X** in review dialog approve / ignore / anomaly.
 
 **Confidence:** High.
 
@@ -92,6 +95,7 @@ A single imported bank line item stored in SQLite.
 | `month` | `YYYY-MM` | Derived from `date` | Used for filtering and summary |
 | `account` | string | Import profile label | Not parsed from a CSV column |
 | `status` | enum | Classification + user override | See §3.2 |
+| `category` | string | User review + learned payee mapping | Free text; pre-filled from `payee_categories` on import |
 | `hash` | string (20 hex chars) | `make_hash(date, description, amount)` | Deduplication key |
 | `imported_at` | timestamp | DB default | `datetime('now')` on insert |
 
@@ -110,6 +114,19 @@ Rolling aggregate per unique `description` string:
 Used only for auto-classification on import. Keyed by exact `description` match.
 
 **Confidence:** High — `database.py`, `anomaly.py`.
+
+#### Payee categories (`payee_categories`)
+
+Learned free-text category per unique `description` string:
+
+| Field | Meaning |
+|-------|---------|
+| `description` | Payee key (same as transaction `description`) |
+| `category` | User-assigned label (e.g. "Groceries", "Rent") |
+
+Updated when the user sets a category during review. Used to pre-fill `transactions.category` on import via `apply_categories()`.
+
+**Confidence:** High — `database.py`, `core/categories.py`, `review_dialog.py`.
 
 #### CSV import profile (`CsvProfile`)
 
@@ -148,9 +165,9 @@ stateDiagram-v2
 
 | Status | Meaning (observed) | Included in monthly summary? |
 |--------|-------------------|------------------------------|
-| `pending` | Needs human review; new payee or &lt; 3 approved samples in stats | Yes |
+| `pending` | Needs human review; new or unknown payee, or &lt; 3 approved samples — **treat as potentially unwanted until approved** | Yes |
 | `approved` | Known payee, amount within 2.5σ of mean (or exact match when σ=0) | Yes |
-| `anomaly` | Known payee, amount outside band | Yes |
+| `anomaly` | Known payee but amount outside statistical band (amount deviation only) | Yes |
 | `ignored` | User-excluded (e.g. internal transfers) | **No** |
 
 **Confidence:** High — `README.md`, `anomaly.py`, `get_summary()` SQL.
@@ -170,17 +187,19 @@ stateDiagram-v2
 | Parse failures | Malformed CSV rows skipped silently (no user-visible error count) | High |
 | Empty description | Row skipped | High |
 | Month assignment | From transaction date, not import date | High |
+| Category learning | Exact `description` match; non-empty category saved to `payee_categories` on review | High |
+| Review queue order | `pending` and `anomaly` only; `month ASC`, `date ASC` | High |
 
 ### 3.4 Explicit non-capabilities (not implemented)
 
 Observed absence in codebase:
 
-- Transaction delete or field edit after import
+- Transaction delete or field edit after import (category editable only in review dialog)
 - Export (noted only in `docs/TODO.md`)
-- Categories/tags
+- Category grouping in monthly summary
+- Fuzzy / similarity-based category pre-fill beyond exact payee match
 - Multi-account column mapping (account is a static profile label)
 - Undo for status changes
-- Schema migrations beyond `CREATE TABLE IF NOT EXISTS`
 - Backup/restore UI
 - Audit log of user actions
 
@@ -220,7 +239,9 @@ sequenceDiagram
     participant ID as ImportDialog
     participant CP as csv_parser
     participant A as anomaly.classify
+    participant Cat as categories.apply_categories
     participant D as database
+    participant R as ReviewDialog
 
     U->>ID: Ctrl+I / Import CSV
     U->>ID: Browse file, configure profile
@@ -229,13 +250,19 @@ sequenceDiagram
     CP-->>ID: transactions (status=pending)
     U->>ID: OK
     ID-->>W: get_transactions()
-    W->>D: get_payee_stats()
+    W->>D: get_payee_stats(), get_payee_categories()
     W->>A: classify(transactions, stats)
     A-->>W: classified transactions
+    W->>Cat: apply_categories(classified, payee_categories)
+    Cat-->>W: transactions with category pre-fill
     W->>D: insert_transactions()
     D-->>W: inserted, skipped_duplicates
     W->>U: QMessageBox summary
     W->>W: refresh UI
+    alt review queue non-empty
+        W->>U: Offer guided review
+        U->>R: Review month-by-month
+    end
 ```
 
 **Steps (confirmed):**
@@ -244,12 +271,14 @@ sequenceDiagram
 2. User picks or creates an import profile; may save profile to `config.json` via **Save Profile**
 3. **Preview** parses and shows up to raw structure + parsed rows; **OK** auto-runs preview if nothing parsed yet
 4. On accept, `classify()` runs against current `payee_stats`
-5. `insert_transactions()` inserts each row; `IntegrityError` on duplicate `hash` → counted as skipped
-6. Information dialog reports inserted vs duplicate counts
+5. `apply_categories()` pre-fills `category` from `payee_categories` (exact payee match)
+6. `insert_transactions()` inserts each row; `IntegrityError` on duplicate `hash` → counted as skipped
+7. Information dialog reports inserted vs duplicate counts
+8. If the review queue is non-empty, user is prompted to start guided review (§4.5)
 
 **Side effects:**
 
-- New rows in `transactions`
+- New rows in `transactions` (with `category` when known)
 - `payee_stats` updated only for rows inserted with `status='approved'`
 - UI filters and summary refresh
 
@@ -268,7 +297,41 @@ sequenceDiagram
 
 **Confidence:** High.
 
-### 4.4 Monthly summary
+### 4.5 Guided month-by-month review
+
+Primary auditing workflow. Presents each `pending` or `anomaly` transaction in chronological order (oldest month first, then date within month).
+
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant W as MainWindow
+    participant R as ReviewDialog
+    participant D as database
+
+    U->>W: Ctrl+R or post-import prompt
+    W->>D: get_review_queue()
+    D-->>R: ordered pending/anomaly rows
+    loop each transaction
+        R->>U: Show payee, amount, status, category (pre-filled)
+        U->>R: Approve (A) / Ignore (I) / Anomaly (X) / Skip
+        R->>D: update_review(id, status, category)
+    end
+    R-->>W: accept
+    W->>W: refresh UI
+```
+
+1. User opens **Review** (**Ctrl+R**) or accepts post-import prompt
+2. `get_review_queue()` returns `pending` and `anomaly` rows ordered `month ASC, date ASC`
+3. For each entry the dialog shows transaction details and an editable category field (combo with known categories)
+4. User chooses **Approve**, **Ignore**, or **Anomaly** (keyboard **A / I / X**), or **Skip** to defer
+5. `update_review()` sets status and category; non-empty category is saved to `payee_categories`; approving updates `payee_stats`
+6. Over repeated imports, known in-band payees auto-approve and known payees get categories pre-filled — manual review volume decreases
+
+**Design intent:** `pending` means “unknown payee — verify legitimacy”; `anomaly` means “known payee, unusual amount”. Both belong in the review queue.
+
+**Confidence:** High.
+
+### 4.6 Monthly summary
 
 `get_summary()` aggregates by `month` for all non-ignored transactions:
 
@@ -333,12 +396,17 @@ For each transaction (unless already `ignored`):
 
 | Operation | Behavior |
 |-----------|----------|
-| `init_db` | Create tables if missing |
-| `insert_transactions` | Insert batch; count duplicates via unique `hash` |
+| `init_db` | Create tables if missing; migrate `category` column on older DBs |
+| `clear_data` | Delete all transactions, stats, and learned categories (profiles untouched) |
+| `insert_transactions` | Insert batch with category; count duplicates via unique `hash` |
 | `get_transactions` | Filter by optional month/status; order `date DESC, id DESC` |
+| `get_review_queue` | Pending/anomaly rows; `month ASC, date ASC` |
 | `update_status` | Set status; conditionally update payee stats |
+| `update_review` | Set status + category; learn payee category; update stats on approve |
 | `get_months` | Distinct months descending |
 | `get_payee_stats` | Full map for classification |
+| `get_payee_categories` | Learned description → category map |
+| `get_known_categories` | Distinct category strings for review combo |
 | `get_summary` | Monthly aggregates excluding ignored |
 
 **Transactional boundaries:** Each public DB function opens its own connection context; `insert_transactions` uses one transaction for the whole batch.
@@ -490,6 +558,7 @@ erDiagram
         text month
         text account
         text status
+        text category
         text hash UK
         text imported_at
     }
@@ -499,9 +568,13 @@ erDiagram
         real mean
         real m2
     }
+    payee_categories {
+        text description PK
+        text category
+    }
 ```
 
-**Relationship:** Logical link `transactions.description` → `payee_stats.description`. **No foreign key** enforced in schema.
+**Relationship:** Logical links `transactions.description` → `payee_stats.description` and `payee_categories.description`. **No foreign key** enforced in schema.
 
 **Confidence:** High.
 
@@ -512,7 +585,7 @@ erDiagram
 | Single writer | One desktop app instance assumed; no file locking beyond SQLite |
 | Stats reflect approved history | Approximate — stats never decrease when status changes away from approved |
 | Dedup is content-based | Same date+description+amount always skipped; account not in hash |
-| Schema evolution | New columns require manual migration; only `IF NOT EXISTS` bootstrap |
+| Schema evolution | `category` column added via `_migrate()` on startup; new tables use `IF NOT EXISTS` |
 
 **Confidence:** High.
 
@@ -566,7 +639,7 @@ erDiagram
 |---------|---------|
 | `uv pip install -e ".[dev]"` | Install package + dev tools |
 | `accounting-anomaly` | Launch GUI |
-| `pytest tests/ -v` | Unit tests (14 tests) |
+| `pytest tests/ -v` | Unit tests (20 tests) |
 | `ruff check/format` | Lint and format |
 
 ### 11.2 CI (`.github/workflows/ci.yml`)
@@ -709,7 +782,9 @@ Keyboard shortcuts, export, charts, categories are **not implemented**. Treat as
 | `csv_parser.parse_amount` | 5 tests | European/US formats, negatives, parentheses |
 | `csv_parser.parse_csv` | 2 tests | Basic parse, empty row skip |
 | `anomaly.classify` | 7 tests | All status branches, σ=0 edge case |
-| `db/*`, `ui/*` | None | — |
+| `categories.apply_categories` | 2 tests | Pre-fill, field preservation |
+| `db/*` | 4 tests | Review queue order, category learning, clear_data |
+| `ui/*` | None | — |
 
 ### 15.2 Key constants
 
@@ -728,9 +803,11 @@ Keyboard shortcuts, export, charts, categories are **not implemented**. Treat as
 | `src/accounting_anomaly/main.py` | Entry |
 | `src/accounting_anomaly/core/csv_parser.py` | CSV + profiles |
 | `src/accounting_anomaly/core/anomaly.py` | Classification |
+| `src/accounting_anomaly/core/categories.py` | Category pre-fill on import |
 | `src/accounting_anomaly/db/database.py` | Persistence |
 | `src/accounting_anomaly/ui/main_window.py` | Shell |
 | `src/accounting_anomaly/ui/import_dialog.py` | Import UX |
+| `src/accounting_anomaly/ui/review_dialog.py` | Guided review |
 | `src/accounting_anomaly/ui/transaction_table.py` | Table model |
 | `tests/test_*.py` | Unit tests |
 
@@ -739,10 +816,9 @@ Keyboard shortcuts, export, charts, categories are **not implemented**. Treat as
 From `docs/TODO.md`:
 
 1. Real bank CSV tuning
-2. Category tagging
-3. Keyboard shortcuts (A/I/X)
-4. Export CSV/PDF
-5. Chart view (QChart or matplotlib)
+2. Category grouping in monthly summary
+3. Export CSV/PDF
+4. Chart view (QChart or matplotlib)
 
 ---
 
@@ -751,6 +827,7 @@ From `docs/TODO.md`:
 | Revision | Date | Author | Changes |
 |----------|------|--------|---------|
 | 1.0 | 2026-06-05 | Reverse-engineered from codebase | Initial specification from `src/`, `tests/`, config, CI |
+| 1.1 | 2026-06-08 | Product direction update | Guided month-by-month review, per-payee category learning, keyboard shortcuts in review dialog |
 
 ---
 

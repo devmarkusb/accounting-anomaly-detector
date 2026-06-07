@@ -3,6 +3,7 @@ from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QComboBox,
+    QDialog,
     QHeaderView,
     QLabel,
     QMainWindow,
@@ -19,7 +20,9 @@ from PySide6.QtWidgets import (
 
 from .. import db
 from ..core.anomaly import classify
+from ..core.categories import apply_categories
 from .import_dialog import ImportDialog
+from .review_dialog import ReviewDialog
 from .transaction_table import TransactionModel
 
 
@@ -77,6 +80,11 @@ class MainWindow(QMainWindow):
         import_action.setShortcut(QKeySequence("Ctrl+I"))
         import_action.triggered.connect(self._import_csv)
         toolbar.addAction(import_action)
+
+        review_action = QAction("Review", self)
+        review_action.setShortcut(QKeySequence("Ctrl+R"))
+        review_action.triggered.connect(self._start_review)
+        toolbar.addAction(review_action)
         toolbar.addSeparator()
 
         toolbar.addWidget(QLabel("  Month: "))
@@ -115,7 +123,10 @@ class MainWindow(QMainWindow):
         if dialog.exec() != QDialog.Accepted:
             return
         stats = db.get_payee_stats()
-        transactions = classify(dialog.get_transactions(), stats)
+        payee_categories = db.get_payee_categories()
+        transactions = apply_categories(
+            classify(dialog.get_transactions(), stats), payee_categories
+        )
         inserted, skipped = db.insert_transactions(transactions)
         QMessageBox.information(
             self,
@@ -123,6 +134,23 @@ class MainWindow(QMainWindow):
             f"Inserted: {inserted}\nSkipped (duplicates): {skipped}",
         )
         self._refresh()
+        if inserted and db.get_review_queue():
+            reply = QMessageBox.question(
+                self,
+                "Start Review",
+                "New transactions need review. Walk through them month by month now?",
+                QMessageBox.Yes | QMessageBox.No,
+            )
+            if reply == QMessageBox.Yes:
+                self._start_review()
+
+    def _start_review(self) -> None:
+        if not db.get_review_queue():
+            QMessageBox.information(self, "Review", "No pending or anomaly transactions to review.")
+            return
+        dialog = ReviewDialog(self)
+        if dialog.exec() == QDialog.Accepted:
+            self._refresh()
 
     def _refresh(self) -> None:
         current_month = self._month_combo.currentData()
@@ -168,7 +196,3 @@ class MainWindow(QMainWindow):
             for tx_id in tx_ids:
                 db.update_status(tx_id, actions[chosen])
             self._refresh()
-
-
-# needed for the isinstance check inside _import_csv
-from PySide6.QtWidgets import QDialog  # noqa: E402

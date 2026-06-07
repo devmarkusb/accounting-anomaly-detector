@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS transactions (
     account     TEXT    NOT NULL DEFAULT '',
     status      TEXT    NOT NULL DEFAULT 'pending'
                         CHECK(status IN ('pending','approved','ignored','anomaly')),
+    category    TEXT    NOT NULL DEFAULT '',
     hash        TEXT    UNIQUE NOT NULL,
     imported_at TEXT    NOT NULL DEFAULT (datetime('now'))
 );
@@ -25,8 +26,15 @@ CREATE TABLE IF NOT EXISTS payee_stats (
     mean        REAL    NOT NULL DEFAULT 0,
     m2          REAL    NOT NULL DEFAULT 0
 );
+
+CREATE TABLE IF NOT EXISTS payee_categories (
+    description TEXT    PRIMARY KEY,
+    category    TEXT    NOT NULL
+);
 """
 # m2 tracks sum of squared deviations via Welford's online algorithm
+
+_REVIEW_STATUSES = ("pending", "anomaly")
 
 
 def _conn() -> sqlite3.Connection:
@@ -38,9 +46,24 @@ def _conn() -> sqlite3.Connection:
     return c
 
 
+def _migrate(c: sqlite3.Connection) -> None:
+    cols = {row[1] for row in c.execute("PRAGMA table_info(transactions)")}
+    if "category" not in cols:
+        c.execute("ALTER TABLE transactions ADD COLUMN category TEXT NOT NULL DEFAULT ''")
+
+
 def init_db() -> None:
     with _conn() as c:
         c.executescript(_SCHEMA)
+        _migrate(c)
+
+
+def clear_data() -> None:
+    """Remove all transactions and learned stats/categories; keeps import profiles."""
+    with _conn() as c:
+        c.execute("DELETE FROM transactions")
+        c.execute("DELETE FROM payee_stats")
+        c.execute("DELETE FROM payee_categories")
 
 
 def make_hash(date: str, description: str, amount: float) -> str:
@@ -52,6 +75,25 @@ def get_payee_stats() -> dict[str, dict]:
     with _conn() as c:
         rows = c.execute("SELECT * FROM payee_stats").fetchall()
     return {r["description"]: dict(r) for r in rows}
+
+
+def get_payee_categories() -> dict[str, str]:
+    with _conn() as c:
+        rows = c.execute("SELECT description, category FROM payee_categories").fetchall()
+    return {r["description"]: r["category"] for r in rows}
+
+
+def get_known_categories() -> list[str]:
+    with _conn() as c:
+        rows = c.execute("""
+            SELECT DISTINCT category FROM (
+                SELECT category FROM transactions WHERE category != ''
+                UNION
+                SELECT category FROM payee_categories
+            )
+            ORDER BY category
+        """).fetchall()
+    return [r[0] for r in rows]
 
 
 def _update_payee_stat(c: sqlite3.Connection, description: str, amount: float) -> None:
@@ -75,6 +117,18 @@ def _update_payee_stat(c: sqlite3.Connection, description: str, amount: float) -
         )
 
 
+def _save_payee_category(c: sqlite3.Connection, description: str, category: str) -> None:
+    if not category:
+        return
+    c.execute(
+        """
+        INSERT INTO payee_categories(description, category) VALUES(?,?)
+        ON CONFLICT(description) DO UPDATE SET category=excluded.category
+        """,
+        (description, category),
+    )
+
+
 def insert_transactions(rows: list[dict]) -> tuple[int, int]:
     """Returns (inserted, skipped_duplicates)."""
     inserted = skipped = 0
@@ -84,8 +138,8 @@ def insert_transactions(rows: list[dict]) -> tuple[int, int]:
             try:
                 c.execute(
                     "INSERT INTO transactions"
-                    "(date, description, amount, balance, month, account, status, hash)"
-                    " VALUES(?,?,?,?,?,?,?,?)",
+                    "(date, description, amount, balance, month, account, status, category, hash)"
+                    " VALUES(?,?,?,?,?,?,?,?,?)",
                     (
                         row["date"],
                         row["description"],
@@ -94,11 +148,15 @@ def insert_transactions(rows: list[dict]) -> tuple[int, int]:
                         row["month"],
                         row.get("account", ""),
                         row["status"],
+                        row.get("category", ""),
                         h,
                     ),
                 )
                 if row["status"] == "approved":
                     _update_payee_stat(c, row["description"], row["amount"])
+                category = row.get("category", "")
+                if category:
+                    _save_payee_category(c, row["description"], category)
                 inserted += 1
             except sqlite3.IntegrityError:
                 skipped += 1
@@ -119,6 +177,21 @@ def get_transactions(*, month: str | None = None, status: str | None = None) -> 
         return [dict(r) for r in c.execute(q, params).fetchall()]
 
 
+def get_review_queue() -> list[dict]:
+    """Pending and anomaly transactions, oldest month first."""
+    placeholders = ",".join("?" * len(_REVIEW_STATUSES))
+    with _conn() as c:
+        rows = c.execute(
+            f"""
+            SELECT * FROM transactions
+            WHERE status IN ({placeholders})
+            ORDER BY month ASC, date ASC, id ASC
+            """,
+            _REVIEW_STATUSES,
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
 def update_status(tx_id: int, status: str) -> None:
     with _conn() as c:
         if status == "approved":
@@ -128,6 +201,23 @@ def update_status(tx_id: int, status: str) -> None:
             if row:
                 _update_payee_stat(c, row["description"], row["amount"])
         c.execute("UPDATE transactions SET status=? WHERE id=?", (status, tx_id))
+
+
+def update_review(tx_id: int, status: str, category: str) -> None:
+    """Apply review decision: status, optional category, and learned payee mapping."""
+    with _conn() as c:
+        row = c.execute(
+            "SELECT description, amount FROM transactions WHERE id=?", (tx_id,)
+        ).fetchone()
+        if row is None:
+            return
+        c.execute(
+            "UPDATE transactions SET status=?, category=? WHERE id=?",
+            (status, category, tx_id),
+        )
+        _save_payee_category(c, row["description"], category)
+        if status == "approved":
+            _update_payee_stat(c, row["description"], row["amount"])
 
 
 def get_months() -> list[str]:
