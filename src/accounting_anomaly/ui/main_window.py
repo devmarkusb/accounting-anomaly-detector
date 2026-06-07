@@ -117,6 +117,28 @@ class MainWindow(QMainWindow):
 
         self.setCentralWidget(splitter)
         self.setStatusBar(QStatusBar())
+        self._build_menu()
+
+    def _build_menu(self) -> None:
+        data_menu = self.menuBar().addMenu("Data")
+        clear_action = QAction("Clear all transaction data…", self)
+        clear_action.triggered.connect(self._clear_data)
+        data_menu.addAction(clear_action)
+
+    def _clear_data(self) -> None:
+        reply = QMessageBox.warning(
+            self,
+            "Clear transaction data",
+            "Delete all transactions, learned payee stats, and categories?\n\n"
+            "Import profiles in config.json are kept.",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if reply != QMessageBox.Yes:
+            return
+        db.clear_data()
+        self._refresh()
+        QMessageBox.information(self, "Data cleared", "All transaction data has been removed.")
 
     def _import_csv(self) -> None:
         dialog = ImportDialog(self)

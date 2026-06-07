@@ -81,10 +81,4 @@ Profiles are saved to `~/.accounting_anomaly/config.json` — configure once per
 
 Duplicate detection: re-importing the same CSV is safe; duplicates are skipped.
 
-**Reset transaction data** (keeps import profiles):
-
-```bash
-rm -f ~/.accounting_anomaly/data.db ~/.accounting_anomaly/data.db-wal ~/.accounting_anomaly/data.db-shm
-```
-
-Or from Python: `accounting_anomaly.db.clear_data()`.
+**Reset transaction data** (keeps import profiles): **Data → Clear all transaction data…** in the app menu.
