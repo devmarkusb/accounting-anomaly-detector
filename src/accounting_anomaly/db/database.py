@@ -223,11 +223,13 @@ def update_review(tx_id: int, status: str, category: str) -> None:
         if row is None:
             return
         identity = payee_identity(dict(row))
+        stored_category = "" if status == "ignored" else category
         c.execute(
             "UPDATE transactions SET status=?, category=? WHERE id=?",
-            (status, category, tx_id),
+            (status, stored_category, tx_id),
         )
-        _save_payee_category(c, identity, category, purpose=row["description"])
+        if status != "ignored":
+            _save_payee_category(c, identity, category, purpose=row["description"])
         if status == "approved":
             _update_payee_stat(c, identity, row["amount"])
 

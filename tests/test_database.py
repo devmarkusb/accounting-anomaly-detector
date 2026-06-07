@@ -55,6 +55,17 @@ def test_update_review_learns_category_by_payee(isolated_db):
     assert db.get_known_categories() == ["Food"]
 
 
+def test_update_review_ignore_clears_category_and_does_not_learn(isolated_db):
+    db.insert_transactions([_tx()])
+    tx_id = db.get_transactions()[0]["id"]
+    db.update_review(tx_id, "ignored", "Food")
+    row = db.get_transactions()[0]
+    assert row["status"] == "ignored"
+    assert row["category"] == ""
+    assert db.get_payee_categories() == {}
+    assert db.get_payee_stats() == {}
+
+
 def test_update_review_does_not_learn_purpose_as_category(isolated_db):
     db.insert_transactions([_tx()])
     tx_id = db.get_transactions()[0]["id"]

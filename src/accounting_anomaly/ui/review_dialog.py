@@ -124,7 +124,7 @@ class ReviewDialog(QDialog):
         if not self._queue or self._index >= len(self._queue):
             return
         tx = self._queue[self._index]
-        category = self._category.currentText().strip()
+        category = "" if status == "ignored" else self._category.currentText().strip()
         db.update_review(tx["id"], status, category)
         self._reviewed += 1
         self._queue.pop(self._index)
